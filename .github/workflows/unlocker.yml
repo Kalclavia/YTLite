@@ -27,6 +27,12 @@ on:
         required: false
         type: string
 
+      expected_youtube_version:
+        description: "App version the base IPA should claim (verified against Info.plist + Apple's registry)"
+        default: "21.41.5"
+        required: false
+        type: string
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -110,6 +116,8 @@ jobs:
     needs: build-unlocker
 
     steps:
+      - uses: actions/checkout@v6
+
       - name: Download built unlocker deb
         uses: actions/download-artifact@v8
         with:
@@ -140,6 +148,23 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ github.token }}
+
+      - name: Verify base IPA (metadata / inventory / Mach-O / endpoint sweep)
+        run: |
+          set -u
+          python3 Unlocker/tools/verify_ipa.py base.ipa \
+            --expect-bundle com.google.ios.youtube \
+            --expect-version "${{ inputs.expected_youtube_version }}" \
+            > verify-report.txt || true
+          cat verify-report.txt
+          # annotate any flags in the run log so they are visible in the UI
+          grep -E "^\[FLAG\]" verify-report.txt | while read -r line; do
+            echo "::warning::$line"
+          done
+          if grep -qE "^\[FATAL\]" verify-report.txt; then
+            echo "::error::base IPA failed verification — refusing to bake"
+            exit 1
+          fi
 
       - name: Fetch official ytplus.deb (only when base IPA is stock)
         if: ${{ inputs.ipa_has_ytplus == false }}
@@ -172,6 +197,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: YouTubePlus-Unlocked
-          path: YouTubePlus_*_Unlocked.ipa
+          path: |
+            YouTubePlus_*_Unlocked.ipa
+            verify-report.txt
           if-no-files-found: error
           retention-days: 90
