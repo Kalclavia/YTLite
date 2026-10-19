@@ -150,6 +150,50 @@ def is_macho(data: bytes):
     return None
 
 
+def check_fairplay(data: bytes):
+    """Return cryptid if an LC_ENCRYPTION_INFO_64 with cryptid!=0 exists
+    in the (first arm64) slice, else None."""
+    def scan(mh_off: int) -> "int | None":
+        try:
+            magic = struct.unpack_from("<I", data, mh_off)[0]
+            if magic not in (0xFEEDFACF, 0xFEEDFACE):
+                return None
+            inc = 32 if magic == 0xFEEDFACF else 28
+            ncmds = struct.unpack_from("<I", data, mh_off + 16)[0]
+            p = mh_off + inc
+            for _ in range(ncmds):
+                cmd, size = struct.unpack_from("<II", data, p)
+                if cmd in (0x21, 0x2C):  # LC_ENCRYPTION_INFO (32b/64b)
+                    cryptid = struct.unpack_from("<I", data, p + 16)[0]
+                    return cryptid
+                if size == 0 or p + size > len(data):
+                    break
+                p += size
+        except (struct.error, IndexError):
+            pass
+        return None
+
+    # single-slice:
+    found = scan(0)
+    # fat: check each slice
+    if found is None:
+        (magic,) = struct.unpack_from("<I", data, 0)
+        if magic == 0xCAFEBABE:
+            try:
+                (nfat,) = struct.unpack_from(">I", data, 4)
+                for i in range(nfat):
+                    cpu, sub, off = struct.unpack_from(">III", data, 8 + i * 20)
+                    if off < len(data):
+                        found = scan(off)
+                        if found is not None:
+                            break
+            except struct.error:
+                pass
+    if found is not None and found != 0:
+        return found
+    return None
+
+
 def macho_load_dylibs(data: bytes):
     """Return (arch, [dylib paths], has_code_signature) for a 64-bit Mach-O."""
     paths, has_codesig = [], False
@@ -342,6 +386,18 @@ def verify_single(ipa_path, rep, expect_bundle=None, expect_version=None):
             continue
         macho_ok += 1
         rep.info(f"mach-o {rel} arch={arch} size={len(full)}")
+
+        # FairPlay check: a decrypted dump has cryptid==0 or the load
+        # command stripped entirely; cryptid!=0 means App Store-encrypted
+        # (e.g. a raw ipatool download) — unusable, refuse loudly.
+        try:
+            enc_checked = check_fairplay(full)
+            if enc_checked is not None and enc_checked != 0:
+                rep.fail(
+                    f"binary {rel}: FairPlay-encrypted (cryptid={enc_checked}) — "
+                    "needs a decrypted dump, not an App Store/ipatool copy")
+        except Exception:
+            pass
 
         try:
             macho_arch, dylibs, has_cs = macho_load_dylibs(full)
