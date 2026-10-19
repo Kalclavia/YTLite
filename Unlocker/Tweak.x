@@ -29,7 +29,7 @@
 static NSString * const kTag = @"[YULU]";
 static NSString * const kSpooferKey = @"YTLiteUnlockSpoof";
 
-#define YLOG(s) do { NSLog(@"%@ %@", kTag, (s)); } while (0)
+#define YLOG(...) do { NSLog(@"%@ %@", kTag, [NSString stringWithFormat:__VA_ARGS__]); } while (0)
 
 static BOOL spoofEnabled(void) {
     id v = [[NSUserDefaults standardUserDefaults] objectForKey:kSpooferKey];
@@ -82,8 +82,8 @@ static void processClass(Class cls) {
 
     unsigned int mCount = 0;
     Method *methods = class_copyMethodList(cls, &mCount);
-    YLOG([NSString stringWithFormat:@"class %@ (super=%@) %u methods", name,
-          cls.superclass ? NSStringFromClass(cls.superclass) : @"nil", mCount]);
+    YLOG(@"class %@ (super=%@) %u methods", name,
+         cls.superclass ? NSStringFromClass(cls.superclass) : @"nil", mCount);
 
     for (unsigned int m = 0; m < mCount; m++) {
         Method mm = methods[m];
@@ -94,8 +94,8 @@ static void processClass(Class cls) {
         BOOL isGetter = (nArgs <= 2);
         BOOL isTruth  = isGetter && ty && isTruthType(ty[0]);
 
-        YLOG([NSString stringWithFormat:@"  method %@ args=%u types=%s%@", selName,
-              nArgs, ty ?: "?", isGetter ? @" (getter)" : @""]);
+        YLOG(@"  method %@ args=%u types=%s%@",
+             selName, nArgs, ty ?: "?", isGetter ? @" (getter)" : @"");
 
         if (isTruth && isActivationVocabulary(selName)) {
             NSString *hookKeyPath = [NSString stringWithFormat:@"%@/%@", name, selName];
@@ -117,8 +117,8 @@ static void processClass(Class cls) {
             IMP *old = malloc(sizeof(IMP));
             *old = NULL;
             MSHookMessageEx(cls, sel, shim, old);
-            YLOG([NSString stringWithFormat:@"SPOOF -[%@ %@] forced %@", name, selName,
-                  (ty[0] == 'B' ? @"YES" : @"1")]);
+            YLOG(@"SPOOF -[%@ %@] forced %@", name, selName,
+                 (ty[0] == 'B' ? @"YES" : @"1"));
         }
     }
     free(methods);
@@ -137,8 +137,8 @@ static void scanOnce(NSString *phase) {
             [interestingClasses addObject:name];
     }
 
-    YLOG([NSString stringWithFormat:@"scan (%@): %u classes, %lu interesting, %lu dumped",
-          phase, count, (unsigned long)interestingClasses.count, (unsigned long)dumpedSet.count]);
+    YLOG(@"scan (%@): %u classes, %lu interesting, %lu dumped",
+         phase, count, (unsigned long)interestingClasses.count, (unsigned long)dumpedSet.count);
 
     for (NSString *name in [interestingClasses copy]) {
         Class c = NSClassFromString(name);
@@ -171,7 +171,7 @@ static void startRescans(void) {
     dumpedSet          = [NSMutableSet new];
     interestingClasses = [NSMutableSet new];
 
-    YLOG([NSString stringWithFormat:@"v1 start (spoof=%d) app=%@", spoofEnabled(),
+    YLOG(@"v1 start (spoof=%d) app=%@", spoofEnabled(),
           [NSBundle mainBundle].bundleIdentifier ?: @"(unknown)"]));
 
     startRescans();
