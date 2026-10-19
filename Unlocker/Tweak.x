@@ -83,7 +83,8 @@ static void processClass(Class cls) {
     unsigned int mCount = 0;
     Method *methods = class_copyMethodList(cls, &mCount);
     YLOG(@"class %@ (super=%@) %u methods", name,
-         cls.superclass ? NSStringFromClass(cls.superclass) : @"nil", mCount);
+         class_getSuperclass(cls) ? NSStringFromClass(class_getSuperclass(cls)) : @"nil",
+         mCount);
 
     for (unsigned int m = 0; m < mCount; m++) {
         Method mm = methods[m];
@@ -172,7 +173,7 @@ static void startRescans(void) {
     interestingClasses = [NSMutableSet new];
 
     YLOG(@"v1 start (spoof=%d) app=%@", spoofEnabled(),
-          [NSBundle mainBundle].bundleIdentifier ?: @"(unknown)"]));
+          [NSBundle mainBundle].bundleIdentifier ?: @"(unknown)");
 
     startRescans();
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
