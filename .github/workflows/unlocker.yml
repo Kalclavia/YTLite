@@ -1,0 +1,177 @@
+name: "[Unlocked] Build YTLiteUnlock and bake a YouTube Plus IPA"
+
+on:
+  workflow_dispatch:
+    inputs:
+      ipa_url:
+        description: "Direct URL to a decrypted IPA. Leave empty to auto-grab the newest YouTubePlus_* IPA from this repo's releases."
+        default: ""
+        required: false
+        type: string
+
+      ipa_has_ytplus:
+        description: "Does that IPA already contain the YTLite tweak? If false, official ytplus.deb comes from dayanch96's releases and gets injected here."
+        default: false
+        required: true
+        type: boolean
+
+      ytplus_version:
+        description: "Official YTLite version for the asset filename (only when ipa_has_ytplus = false). Tags use dashes, asset names use dots: 6.0.b2 / v6.0-b2."
+        default: "6.0.b2"
+        required: false
+        type: string
+
+      ytplus_tag:
+        description: "Official YTLite release tag (only when ipa_has_ytplus = false)"
+        default: "v6.0-b2"
+        required: false
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-unlocker:
+    name: Build YTLiteUnlock deb
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Dependencies
+        run: brew install make ldid dpkg
+
+      - name: Set PATH environment variable
+        run: |
+          echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
+          echo "THEOS=${{ github.workspace }}/theos" >> $GITHUB_ENV
+
+      - name: Cache Theos
+        id: theos
+        uses: actions/cache@v5
+        env:
+          cache-name: theos_unlocker_cache_9bc7340
+        with:
+          path: theos/
+          key: ${{ env.cache-name }}
+          restore-keys: ${{ env.cache-name }}
+
+      - name: Setup Theos
+        if: steps.theos.outputs.cache-hit != 'true'
+        uses: actions/checkout@v6
+        with:
+          repository: theos/theos
+          ref: 9bc73406cf80b711ef4d02c15ff1dedc4478a275
+          path: theos
+          submodules: recursive
+
+      - name: Download iOS SDK
+        if: steps.theos.outputs.cache-hit != 'true'
+        run: |
+          git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/theos/sdks/
+          cd sdks
+          git sparse-checkout set --no-cone iPhoneOS16.5.sdk
+          git checkout
+          mv *.sdk $THEOS/sdks
+
+      - name: Build YTLiteUnlock
+        working-directory: Unlocker
+        run: |
+          make clean
+          make package FINALPACKAGE=1
+          cp packages/*.deb ../YTLiteUnlock.deb
+          cp .theos/obj/YTLiteUnlock.dylib ../YTLiteUnlock.dylib 2>/dev/null \
+            || cp theos/obj/YTLiteUnlock.dylib ../YTLiteUnlock.dylib 2>/dev/null \
+            || (echo "::warning::built dylib path not found; deb artifact still available" && exit 0)
+
+      - name: Upload unlocker artifact (deb)
+        uses: actions/upload-artifact@v7
+        with:
+          name: YTLiteUnlock
+          path: YTLiteUnlock.deb
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload unlocker dylib (for LiveContainer import)
+        if: hashFiles('YTLiteUnlock.dylib') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: YTLiteUnlock-dylib
+          path: YTLiteUnlock.dylib
+          retention-days: 90
+
+  bake-ipa:
+    name: Bake unlocked IPA
+    runs-on: macos-latest
+    needs: build-unlocker
+
+    steps:
+      - name: Download built unlocker deb
+        uses: actions/download-artifact@v8
+        with:
+          name: YTLiteUnlock
+          path: ${{ github.workspace }}
+
+      - name: Download YTLiteInside already YTLite IPA or fetch official base
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.ipa_url }}" ]; then
+            curl -sL "${{ inputs.ipa_url }}" -o base.ipa
+          else
+            echo "Searching ${{ github.repository }} releases for a YouTubePlus_* IPA..."
+            tag=$(gh api "repos/${{ github.repository }}/releases" \
+                   -q '[.[] | select(.tag_name | startswith("ytp-"))][0].tag_name')
+            if [ -z "$tag" ] || [ "$tag" = "null" ]; then
+              echo "::error::No ytp-* release found. Either run the official 'Create YouTube Plus app' workflow first, or paste an ipa_url."
+              exit 1
+            fi
+            echo "Using release tag: $tag"
+            gh release download "$tag" --repo "${{ github.repository }}" \
+              --pattern "YouTubePlus_*.ipa" --single-file --output base.ipa
+          fi
+          file_type=$(file --mime-type -b base.ipa)
+          if [[ "$file_type" != "application/x-ios-app" && "$file_type" != "application/zip" ]]; then
+            echo "::error::Validation failed: the base IPA is not valid. Detected type: $file_type"
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Fetch official ytplus.deb (only when base IPA is stock)
+        if: ${{ inputs.ipa_has_ytplus == false }}
+        run: |
+          set -euo pipefail
+          dp_url="https://github.com/dayanch96/YTLite/releases/download/${{ inputs.ytplus_tag }}/com.dvntm.ytlite_${{ inputs.ytplus_version }}_iphoneos-arm.deb"
+          echo "Fetching $dp_url"
+          curl -sL "$dp_url" -o ytplus.deb
+          file_type=$(file --mime-type -b ytplus.deb)
+          if [[ "$file_type" != "application/vnd.debian.binary-package" ]]; then
+            echo "::error::Validation failed: the downloaded YTLite deb is not valid. Detected type: $file_type from $dp_url"
+            exit 1
+          fi
+
+      - name: Install cyan
+        run: pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
+
+      - name: Bake unlocked IPA
+        run: |
+          set -euo pipefail
+          tweaks="YTLiteUnlock.deb"
+          if [ "${{ inputs.ipa_has_ytplus }}" = "false" ]; then
+            tweaks="ytplus.deb $tweaks"
+          fi
+          version="${{ inputs.ytplus_version }}"
+          [ "$version" = "" ] && version="local"
+          cyan -i base.ipa -o "YouTubePlus_${version}_Unlocked.ipa" -uwef $tweaks
+
+      - name: Upload unlocked IPA artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: YouTubePlus-Unlocked
+          path: YouTubePlus_*_Unlocked.ipa
+          if-no-files-found: error
+          retention-days: 90
