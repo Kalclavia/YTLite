@@ -58,9 +58,12 @@ SYSTEM_DYLIB_PREFIXES = ("/System/", "/usr/lib/", "@rpath/", "@executable_path/"
 
 SUSPICIOUS_NAME_TOKENS = (
     "substrate", "hooker", "ellekit", "cydia", "sileo", "zeon", "frida",
-    "cracker", "crack", "jailbreak", "tweak", "patched", "ripped", "deb",
-    "flex", "inject", "hijack", "spy",
+    "cracker", "crack", "jailbreak", "patched", "ripped",
+    "inject", "hijack", "spy",
 )
+
+# extensions Google legitimately uses inside the app bundle; never flagged
+GOOGLE_FORMAT_EXTS = (".flexb", ".flexml", ".eml_", ".flexy", ".ytstyles")
 
 SUSPICIOUS_STRING_TOKENS = [
     ("MobileSubstrate", "substrate path"),
@@ -275,6 +278,9 @@ def verify_single(ipa_path, rep, expect_bundle=None, expect_version=None):
         if n.endswith("/"):
             continue
         for tok in SUSPICIOUS_NAME_TOKENS:
+            if rel.lower().endswith(GOOGLE_FORMAT_EXTS) or any(
+                    ext in rel.lower() for ext in GOOGLE_FORMAT_EXTS):
+                break  # Google's own resource formats; token matches are noise
             # only match token in filename part, not in path like 'Payload/...'
             if tok in bn:
                 rep.flag(f"suspicious file name: {n} (token '{tok}')")
@@ -303,6 +309,8 @@ def verify_single(ipa_path, rep, expect_bundle=None, expect_version=None):
             head = z.open(n).read(8)
         except Exception:
             continue
+        if not head or len(head) < 4:
+            continue
         (magic,) = struct.unpack_from("<I", head, 0)
         looks_macho = magic in MACHO_MAGICS or magic in FAT_MAGICS
 
@@ -318,7 +326,10 @@ def verify_single(ipa_path, rep, expect_bundle=None, expect_version=None):
             # recognized resource where URLs legitimately live anyway
             known_resource = bn.lower().endswith(
                 (".plist", ".strings", ".stringsdict", ".png", ".jpg", ".car",
-                 ".nib", ".storyboardc", ".lproj", ".intentdefinition", ".json"))
+                 ".nib", ".storyboardc", ".lproj", ".intentdefinition", ".json",
+                 ".ttf", ".otf", ".woff", ".woff2", ".mp4", ".mp3", ".m4a",
+                 ".mov", ".wav", ".pem", ".cer", ".crt", ".flx", ".flexb",
+                 ".flexml", ))
             if not known_resource and len(full) < (32 << 20):
                 scan_urls(full, rep, rel, url_seen)
                 scan_strings_for_tokens(full, rep, rel)

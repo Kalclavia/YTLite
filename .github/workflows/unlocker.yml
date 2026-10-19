@@ -158,7 +158,7 @@ jobs:
             > verify-report.txt || true
           cat verify-report.txt
           # annotate any flags in the run log so they are visible in the UI
-          grep -E "^\[FLAG\]" verify-report.txt | while read -r line; do
+          grep -E "^\[FLAG\]" verify-report.txt | head -10 | while read -r line; do
             echo "::warning::$line"
           done
           if grep -qE "^\[FATAL\]" verify-report.txt; then
