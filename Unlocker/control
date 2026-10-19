@@ -1,0 +1,9 @@
+Package: com.kalclavia.ytliteunlock
+Name: YTLiteUnlock
+Depends: mobilesubstrate
+Version: 0.1.0
+Architecture: iphoneos-arm
+Description: Personal-use unlocker companion for YTLite — spoofs subscription-status getters and logs gate-class internals. Do not redistribute.
+Maintainer: Kalclavia
+Author: Kalclavia
+Section: Tweaks
