@@ -142,8 +142,10 @@ jobs:
               base-*) pattern="*.ipa" ;;
               *)      pattern="YouTubePlus_*.ipa" ;;
             esac
+            mkdir -p /tmp/ghdl
             gh release download "$tag" --repo "${{ github.repository }}" \
-              --pattern "$pattern" --single-file --output base.ipa
+              --pattern "$pattern" --clobber --dir /tmp/ghdl
+            mv /tmp/ghdl/*.ipa base.ipa
           fi
           file_type=$(file --mime-type -b base.ipa)
           if [[ "$file_type" != "application/x-ios-app" && "$file_type" != "application/zip" ]]; then
