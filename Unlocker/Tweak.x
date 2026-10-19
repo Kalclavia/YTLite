@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+#import <os/log.h>
 #import <substrate.h>
 
 // =====================================================================
@@ -26,10 +27,14 @@
 // All output is prefixed [YULU]; read with `idevicesyslog | grep YULU`.
 // =====================================================================
 
-static NSString * const kTag = @"[YULU]";
 static NSString * const kSpooferKey = @"YTLiteUnlockSpoof";
 
-#define YLOG(...) do { NSLog(@"%@ %@", kTag, [NSString stringWithFormat:__VA_ARGS__]); } while (0)
+// NSLog dynamic strings are privacy-redacted ("<private>") when viewed
+// over idevicesyslog; os_log with %{public}@ survives the stream intact.
+#define YLOG(...) do { \
+    NSString *_m = [NSString stringWithFormat:__VA_ARGS__]; \
+    os_log(OS_LOG_DEFAULT, "[YULU] %{public}@", _m); \
+} while (0)
 
 static BOOL spoofEnabled(void) {
     id v = [[NSUserDefaults standardUserDefaults] objectForKey:kSpooferKey];
