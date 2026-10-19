@@ -130,16 +130,20 @@ jobs:
           if [ -n "${{ inputs.ipa_url }}" ]; then
             curl -sL "${{ inputs.ipa_url }}" -o base.ipa
           else
-            echo "Searching ${{ github.repository }} releases for a YouTubePlus_* IPA..."
+            echo "Searching ${{ github.repository }} releases for a base IPA..."
             tag=$(gh api "repos/${{ github.repository }}/releases" \
-                   -q '[.[] | select(.tag_name | startswith("ytp-"))][0].tag_name')
+                   -q '[.[] | select(.tag_name | (startswith("ytp-") or startswith("base-")))][0].tag_name')
             if [ -z "$tag" ] || [ "$tag" = "null" ]; then
-              echo "::error::No ytp-* release found. Either run the official 'Create YouTube Plus app' workflow first, or paste an ipa_url."
+              echo "::error::No ytp-*/base-* release found. Either run the official 'Create YouTube Plus app' workflow first, upload a base-* draft release, or paste an ipa_url."
               exit 1
             fi
             echo "Using release tag: $tag"
+            case "$tag" in
+              base-*) pattern="*.ipa" ;;
+              *)      pattern="YouTubePlus_*.ipa" ;;
+            esac
             gh release download "$tag" --repo "${{ github.repository }}" \
-              --pattern "YouTubePlus_*.ipa" --single-file --output base.ipa
+              --pattern "$pattern" --single-file --output base.ipa
           fi
           file_type=$(file --mime-type -b base.ipa)
           if [[ "$file_type" != "application/x-ios-app" && "$file_type" != "application/zip" ]]; then
