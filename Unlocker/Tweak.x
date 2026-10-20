@@ -10,7 +10,7 @@
 #import <Security/Security.h>
 
 // =====================================================================
-// YTLiteUnlock — v2.0 "recon round 4"
+// YTLiteUnlock — v2.1 "recon + crack trial"
 //
 // Static RE established (offline tooling):
 //   - YTLite 6.0.b2 compiles every function as a state machine; every
@@ -370,23 +370,52 @@ static void installTargetedHooks(NSString *name, Class cls) {
 }
 
 // ---------------------------------------------------------------
-// gate function: fingerprint locate + transparent hook
+// gate function: fingerprint locate + transparent hook (+ crack trial)
 // ---------------------------------------------------------------
 static void *orig_gate = NULL;
 static long  gateCalls = 0;
 static BOOL  gateHookInstalled = NO;
 
+// crack-trial override: set NSUD key YTLiteUnlockForceGate to a decimal
+// integer BEFORE launch; every gate call returns that raw value (w0).
+// Absent/-1 = transparent pass-through (recon only). NOTE: a wrong
+// override can crash the first consumer that dereferences it — the
+// GATE-FORCE lines show exactly which call did it. Mode changes need a
+// relaunch (cached once, same pattern as the spoof key).
+static long gateForceMode(void) {
+    static long cached = -2;   // -2 = not read yet
+    if (cached == -2) {
+        id v = [[NSUserDefaults standardUserDefaults] objectForKey:@"YTLiteUnlockForceGate"];
+        cached = (v == nil) ? -1 : [v longLongValue];
+    }
+    return cached;
+}
+
 static void *hook_gate(void *a0, void *a1, void *a2, void *a3) {
     void *r = ((void *(*)(void *, void *, void *, void *))orig_gate)(a0, a1, a2, a3);
     gateCalls++;
-    if (gateCalls <= 200 || (gateCalls % 20) == 0) {
-        YLOG(@"GATE #%ld fn=%p args a0=%p a1=%p a2=%p a3=%p ret=0x%llx (int=%lld)",
-             (long)gateCalls, orig_gate, a0, a1, a2, a3,
-             (unsigned long long)(uintptr_t)r, (long long)(intptr_t)r);
-    } else if (gateCalls == 201) {
-        YLOG(@"GATE logging reduced to every 20th call (first 200 fully logged)");
+    long mode = gateForceMode();
+    BOOL forced = (mode >= 0);
+    void *fr = forced ? (void *)(intptr_t)mode : r;
+    if (!forced) {
+        // transparent recon: full log for the first 200, every 20th after
+        if (gateCalls <= 200 || (gateCalls % 20) == 0) {
+            YLOG(@"GATE #%ld fn=%p args a0=%p a1=%p a2=%p a3=%p ret=0x%llx (int=%lld)",
+                 (long)gateCalls, orig_gate, a0, a1, a2, a3,
+                 (unsigned long long)(uintptr_t)r, (long long)(intptr_t)r);
+        } else if (gateCalls == 201) {
+            YLOG(@"GATE logging reduced to every 20th call (first 200 fully logged)");
+        }
+    } else {
+        // crack trial: log every forced call (bows out at the cap)
+        if (gateCalls <= 1000 && !observeCapHit()) {
+            YLOG(@"GATE-FORCE #%ld mode=%ld args a0=%p a1=%p a2=%p a3=%p orig=0x%llx(int=%lld) -> FORCED=0x%llx(int=%lld)",
+                 (long)gateCalls, mode, a0, a1, a2, a3,
+                 (unsigned long long)(uintptr_t)r, (long long)(intptr_t)r,
+                 (unsigned long long)(uintptr_t)fr, (long long)(intptr_t)fr);
+        }
     }
-    return r;
+    return fr;
 }
 
 static void locateAndHookGate(NSString *phase) {
@@ -423,7 +452,10 @@ static void locateAndHookGate(NSString *phase) {
                  named ? "named" : "fallback");
             MSHookFunction((void *)fn, (void *)hook_gate, &orig_gate);
             gateHookInstalled = YES;
-            YLOG(@"GATE HOOK installed (phase %@) — returns will be logged", phase);
+            long mode = gateForceMode();
+            YLOG(@"GATE HOOK installed (phase %@)%@ — %s", phase,
+                 mode >= 0 ? [NSString stringWithFormat:@" force mode=%ld ACTIVE", mode] : @"",
+                 mode >= 0 ? "crack trial live" : "returns will be logged");
             return;
         }
         if (named) {
@@ -689,7 +721,7 @@ static void sniff_NSUD_removeObject(id self, SEL _cmd, NSString *key) {
     interestingClasses = [NSMutableSet new];
     targetedHooked     = [NSMutableSet new];
 
-    YLOG(@"v2.0 (recon round 4) start (spoof=%d) app=%@", spoofEnabled(),
+    YLOG(@"v2.1 (recon + crack trial) start (spoof=%d) app=%@", spoofEnabled(),
           [NSBundle mainBundle].bundleIdentifier ?: @"(unknown)");
     YLOG(@"gate fingerprint u32[0]=0x%08x, MSHookFunction present=%d", kGateFP[0], &MSHookFunction != NULL);
 
