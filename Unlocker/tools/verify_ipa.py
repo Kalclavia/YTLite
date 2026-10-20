@@ -388,14 +388,14 @@ def verify_single(ipa_path, rep, expect_bundle=None, expect_version=None):
         rep.info(f"mach-o {rel} arch={arch} size={len(full)}")
 
         # FairPlay check: a decrypted dump has cryptid==0 or the load
-        # command stripped entirely; cryptid!=0 means App Store-encrypted
-        # (e.g. a raw ipatool download) — unusable, refuse loudly.
+        # command stripped entirely; cryptid!=0 means the binary is
+        # App Store-encrypted — unusable for LiveContainer/cyan, refuse.
         try:
             enc_checked = check_fairplay(full)
             if enc_checked is not None and enc_checked != 0:
                 rep.fail(
                     f"binary {rel}: FairPlay-encrypted (cryptid={enc_checked}) — "
-                    "needs a decrypted dump, not an App Store/ipatool copy")
+                    "needs a decrypted dump, not an App Store distribution copy")
         except Exception:
             pass
 
