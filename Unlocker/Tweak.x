@@ -10,7 +10,7 @@
 #import <Security/Security.h>
 
 // =====================================================================
-// YTLiteUnlock — v2.1 "recon + crack trial"
+// YTLiteUnlock — v2.2 "rootful fingerprint + crack trial"
 //
 // Static RE established (offline tooling):
 //   - YTLite 6.0.b2 compiles every function as a state machine; every
@@ -20,9 +20,13 @@
 //     0xb95a0 ("gate"): 75 `bl` call sites, every one inside a thin
 //     stp/ldp/ret veneer under feature code (downloads, shorts, player,
 //     sponsorblock, download menu...).
-//   - Its prologue loads 8 guard immediates (w21..w28); the 16-instruction
-//     block at VMA 0xb95c0 is UNIQUE in the whole 38 MB image — perfect
-//     runtime offset locator.
+//   - Its prologue loads 8 guard immediates (w21..w28); the movz/movk
+//     block is UNIQUE per build. NOTE: the .deb carries TWO builds —
+//     rootless (var/jb, gate at 0xb95a0, was analyzed offline first)
+//     and rootful (injected into the IPA's Frameworks, gate at 0xb98a4,
+//     4 movz/movk pairs at entry). kGateFP below is the ROOTFUL one —
+//     verified unique in the 38 MB shipped dylib. On-device round 4
+//     proved the rootless fingerprint never matches the loaded image.
 //   - Gate strings (Access.AccountRequired / dontRemindAccess / ...) are
 //     decrypted at runtime by inline per-byte XOR chains.
 //   - v1.3 runtime log confirmed every YTLite class registers live:
@@ -54,13 +58,16 @@
 // All output prefixed [YULU]: `idevicesyslog | grep YULU`
 // =====================================================================
 
-static const uint32_t kGateFP[16] = {
-    0x528646d5, 0x72bcf6d5, 0x52879f36, 0x72b4a916,
-    0x5285bd57, 0x72b44177, 0x529dda78, 0x72b41758,
-    0x529a3c39, 0x72b19c39, 0x528ea5fa, 0x72ada9fa,
-    0x5286e81b, 0x72aba39b, 0x528ea51c, 0x72a41b5c,
+static const uint32_t kGateFP[8] = {
+    0x52813955, 0x72b7fa15, 0x528e7319, 0x72aae4d9,
+    0x5293047a, 0x72a780da, 0x5291fa9b, 0x72a4679b,
 };
+static const unsigned long kGateFPLen = 8;  // unique in the whole 38 MB image (verified offline)
 static const uint32_t kGatePrologue[4] = { 0xd107c3ff, 0xa9196ffc, 0xa91a67fa, 0xa91b5ff8 };
+
+// === IMPORTANT: all static-RE VMA notes here and in docs/RE-notes-6.0.b2-gate.md
+// === refer to the ROOTLESS build; the loaded (rootful) build shifts functions
+// === by a few hundred bytes and randomizes the guard magics per build.
 
 // MSHook* live in CydiaSubstrate; LiveContainer maps its ellekit-based
 // shim at /Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate —
@@ -721,7 +728,7 @@ static void sniff_NSUD_removeObject(id self, SEL _cmd, NSString *key) {
     interestingClasses = [NSMutableSet new];
     targetedHooked     = [NSMutableSet new];
 
-    YLOG(@"v2.1 (recon + crack trial) start (spoof=%d) app=%@", spoofEnabled(),
+    YLOG(@"v2.2 (rootful fingerprint + crack trial) start (spoof=%d) app=%@", spoofEnabled(),
           [NSBundle mainBundle].bundleIdentifier ?: @"(unknown)");
     YLOG(@"gate fingerprint u32[0]=0x%08x, MSHookFunction present=%d", kGateFP[0], &MSHookFunction != NULL);
 

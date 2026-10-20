@@ -41,16 +41,37 @@ One fat licensing-manager function:
   0x26d9e0–0x2729d8 — all plain-C feature code, un-ObjC). Full list:
   `/tmp/opencode/callers_b95a0.txt`.
 
-### Runtime locator fingerprint (v2.0 embeds these — unique image-wide, 1 hit)
+### Runtime locator fingerprint (v2.2 embeds these — unique in the SHIPPED image)
 
-16 movz/movk pairs at VMA `0xb95c0` (function entry = fingerprint − 0x20):
+**Build-variant lesson (round 4, 2026-10-20):** the .deb ships TWO branches —
+rootless (`var/jb/…/YTLite.dylib`, gate at 0xb95a0, 8 movz/movk pairs, the
+build the offline RE covered) and rootful (injected by cyan into the IPA's
+`Frameworks/`, gate at 0xb98a4, 4 pairs at entry + 3 more later; later
+functions pair up 1:1 with rootless in order but shifted several hundred bytes
+and with per-build-randomized magics). The device loads the ROOTFUL build, so
+the shipped fingerprint must be extracted from it. The v2.0/v2.1 n-nullable
+digs used the rootless constants and correctly reported "no fingerprint match"
+— the scan itself was right, the constants were from the wrong branch.
+
+Rootful (shipped) gate fingerprint — first 8 words at fn entry (fn = fp − 0x20;
+exactly 1 occurrence in the entire 38 MB file offline-verified):
 
 ```
-0x528646d5, 0x72bcf6d5, 0x52879f36, 0x72b4a916,   /* w21 = 0xa20b2dea-family guards */
+0x52813955, 0x72b7fa15, 0x528e7319, 0x72aae4d9,
+0x5293047a, 0x72a780da, 0x5291fa9b, 0x72a4679b,
+```
+
+Rootless (analysis) gate fingerprint, for reference:
+
+```
+0x528646d5, 0x72bcf6d5, 0x52879f36, 0x72b4a916,
 0x5285bd57, 0x72b44177, 0x529dda78, 0x72b41758,
 0x529a3c39, 0x72b19c39, 0x528ea5fa, 0x72ada9fa,
 0x5286e81b, 0x72aba39b, 0x528ea51c, 0x72a41b5c,
 ```
+
+Rootless gate VMA 0xb95a0 → rootful gate at 0xb98a4 (same order-relation
+holds for the other 22 shared-prologue functions in both builds).
 
 ## 3. Strings / prefs
 
@@ -108,3 +129,26 @@ Known risk: `MSHookFunction` is a weak import — if LC's Substrate shim does
 not export it, the gate hook self-skips and recon still proceeds via the
 class hooks; round 5 would then hook the 2 thin veneers with
 MSHookMessageEx-style inline patch fallback or use fishhook.
+
+## 7. Round-4 runtime recap (device log /tmp/yulu-boot4.log, 2026-10-20)
+
+- Fingerprint scan ran on the named YTLite image (23 MB __text) at ticks
+  1-13, `MSHookFunction present=1`, zero matches → rootless-vs-rootful
+  constants issue above (fixed in v2.2).
+- 18 observe hooks installed each boot; `-[YTPSettingsBuilder patreon*]`
+  encodings captured: `patreonSection: @24@0:8@16`, `patreonStatusCell
+  @16@0:8`, `patreonButtonCellWithType:model: @32@0:8@16@24` — all return
+  `DVNCell`/`DVNSection` (pure UI builders, gate decision elsewhere).
+- Keychain: Google-SSO tokens only (`com.google.sso.optional.1.accessToken`
+  acc=<YouTube-account-63-digit-id>, len 310) — YTLite gate login state is
+  NOT in Keychain under dvn/ytl names (probe at t15 both boots).
+- App-domain NSUD write-vocabulary this round = YouTube's own keys; no
+  dvntm/access/jwt writes appeared on disk either round yet — gate state
+  likely in-memory or server-side cookie only.
+- `DVNPatreonContext` never registered as an objectifiable class this boot
+  (its presentationAnchor hook absent) — it appears only during the login
+  web-flow, so hooking it requires triggering the login screen before
+  tick-class-discovery completes (or hooking by lazily rescanning — v2.1's
+  5-min scan loop already covers this, and did not fire this round: the
+  login page was opened through LC's embedded auth, class resolved inside
+  a private framework context? round 5 tip: open the login sheet EARLY).
