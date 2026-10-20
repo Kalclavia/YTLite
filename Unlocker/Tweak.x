@@ -44,8 +44,10 @@ static BOOL spoofEnabled(void) {
 
 static BOOL matchesInterest(NSString *n) {
     if (!n) return NO;
-    NSArray *pats = @[@"DVNPatreon", @"DVNValueStore", @"DVNSupporters",
-                      @"WelcomeVC", @"Patreon"];
+    if ([n hasPrefix:@"DVN"] || [n hasPrefix:@"YTP"]) return YES;
+    NSArray *pats = @[@"Patreon", @"Supporters", @"Welcome", @"Account",
+                      @"Premium", @"License", @"Subscription", @"Entitle",
+                      @"Access", @"Login"];
     for (NSString *p in pats)
         if ([n rangeOfString:p options:NSCaseInsensitiveSearch].length)
             return YES;
@@ -139,8 +141,31 @@ static void scanOnce(NSString *phase) {
         Class c = classes[i];
         if (class_isMetaClass(c)) continue;
         NSString *name = NSStringFromClass(c);
-        if (name && matchesInterest(name))
-            [interestingClasses addObject:name];
+        if (name && matchesInterest(name)) {
+            if (![interestingClasses containsObject:name]) {
+                YLOG(@"NEW interesting class discovered at %@: %@", phase, name);
+                [interestingClasses addObject:name];
+            }
+        }
+    }
+
+    // one-time deep probe: which class owns the entitlement check?
+    static BOOL probed = NO;
+    if (!probed && count) {
+        probed = YES;
+        SEL probe = NSSelectorFromString(@"verifyAccessWithCompletion:");
+        for (unsigned int i = 0; i < count; i++) {
+            Class c = classes[i];
+            if (class_isMetaClass(c)) continue;
+            if (class_getInstanceMethod(c, probe)) {
+                NSString *gname = NSStringFromClass(c);
+                YLOG(@"GATE OWNER: %@ implements verifyAccessWithCompletion: (super=%@)",
+                     gname,
+                     c ? (c.superclass ? NSStringFromClass(c.superclass) : @"nil") : @"nil");
+                [interestingClasses addObject:gname];
+                processClass(c);
+            }
+        }
     }
 
     YLOG(@"scan (%@): %u classes, %lu interesting, %lu dumped",
@@ -164,7 +189,7 @@ static void startRescans(void) {
     dispatch_source_set_event_handler(timer, ^{
         ticks++;
         scanOnce([NSString stringWithFormat:@"tick %ld", (long)ticks]);
-        if (ticks >= 45) {      // stop rescans after ~45 s; hooks stay installed
+        if (ticks >= 300) {     // keep probing for ~5 min (late gate classes)
             dispatch_suspend(timer);
             YLOG(@"scan loop finished; hooks remain installed");
         }
@@ -172,15 +197,43 @@ static void startRescans(void) {
     dispatch_resume(timer);
 }
 
+// --- NSUserDefaults key sniffer (instrumentation only) ---
+static IMP orig_NSUD_objectForKey = NULL;
+static id sniff_NSUD_objectForKey(id self, SEL _cmd, NSString *key) {
+    id v = ((id(*)(id, SEL, NSString *))orig_NSUD_objectForKey)(self, _cmd, key);
+    if ([key isKindOfClass:[NSString class]]) {
+        static int logged = 0;
+        static BOOL warned = NO;
+        if (logged >= 60) {
+            if (!warned) { warned = YES; YLOG(@"NSUD sniffer capped at 60 lines"); }
+        } else if ([key rangeOfString:
+                     @"(?i)(access|token|premium|subscri|account|license|patreon"
+                     @"|dvn|ytplus|dvntm|plan|unlock|welcome)"
+                     options:NSRegularExpressionSearch].length) {
+            logged++;
+            YLOG(@"NSUD read key=%@ val=%@", key, v);
+        }
+    }
+    return v;
+}
+
 %ctor {
     hookedSet          = [NSMutableSet new];
     dumpedSet          = [NSMutableSet new];
     interestingClasses = [NSMutableSet new];
 
-    YLOG(@"v1 start (spoof=%d) app=%@", spoofEnabled(),
+    YLOG(@"v1.3 start (spoof=%d) app=%@", spoofEnabled(),
           [NSBundle mainBundle].bundleIdentifier ?: @"(unknown)");
 
     startRescans();
+    {
+        Class nsud = objc_getClass("NSUserDefaults");
+        if (nsud) {
+            MSHookMessageEx(nsud, NSSelectorFromString(@"objectForKey:"),
+                            (IMP)sniff_NSUD_objectForKey, &orig_NSUD_objectForKey);
+            YLOG(@"NSUserDefaults sniffer installed");
+        }
+    }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         scanOnce(@"late");
