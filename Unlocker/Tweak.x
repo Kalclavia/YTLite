@@ -161,7 +161,7 @@ static void scanOnce(NSString *phase) {
                 NSString *gname = NSStringFromClass(c);
                 YLOG(@"GATE OWNER: %@ implements verifyAccessWithCompletion: (super=%@)",
                      gname,
-                     c ? (c.superclass ? NSStringFromClass(c.superclass) : @"nil") : @"nil");
+                     class_getSuperclass(c) ? NSStringFromClass(class_getSuperclass(c)) : @"nil");
                 [interestingClasses addObject:gname];
                 processClass(c);
             }
