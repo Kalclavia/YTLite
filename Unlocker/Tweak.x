@@ -2,6 +2,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
+#import <substrate.h>
 #import <os/log.h>
 #import <mach-o/dyld.h>
 #import <mach-o/getsect.h>
@@ -61,10 +62,11 @@ static const uint32_t kGateFP[16] = {
 };
 static const uint32_t kGatePrologue[4] = { 0xd107c3ff, 0xa9196ffc, 0xa91a67fa, 0xa91b5ff8 };
 
-__attribute__((weak_import))
-void MSHookMessageEx(Class cls, SEL sel, IMP imp, IMP *result);
-__attribute__((weak_import))
-void *MSHookFunction(void *symbol, void *hook, void **old);
+// MSHook* live in CydiaSubstrate; LiveContainer maps its ellekit-based
+// shim at /Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate —
+// it exports BOTH MSHookMessageEx and MSHookFunction (verified in LC's
+// Resources/Frameworks binary). The dylib links -lsubstrate (vendored
+// libsubstrate.tbd stub, install name matches LC's shim exactly).
 
 static NSString * const kSpooferKey = @"YTLiteUnlockSpoof";
 

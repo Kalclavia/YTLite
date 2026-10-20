@@ -8,6 +8,7 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = YTLiteUnlock
 $(TWEAK_NAME)_FRAMEWORKS = UIKit Foundation Security
+$(TWEAK_NAME)_LDFLAGS = -lsubstrate
 $(TWEAK_NAME)_CFLAGS = -fobjc-arc
 $(TWEAK_NAME)_FILES = Tweak.x
 
