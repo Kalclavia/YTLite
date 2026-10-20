@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import <os/log.h>
 #import <mach-o/dyld.h>
 #import <mach-o/getsect.h>
@@ -498,10 +499,10 @@ static void dumpPrefs(NSString *phase) {
         Class yc = NSClassFromString(@"YTLUserDefaults");
         SEL sud = NSSelectorFromString(@"standardUserDefaults");
         if (yc && [yc respondsToSelector:sud]) {
-            id inst = [yc performSelector:sud];
+            id inst = ((id (*)(id, SEL))objc_msgSend)(yc, sud);
             SEL dr = NSSelectorFromString(@"dictionaryRepresentation");
             if (inst && [inst respondsToSelector:dr]) {
-                NSDictionary *dd = [inst performSelector:dr];
+                NSDictionary *dd = ((id (*)(id, SEL))objc_msgSend)(inst, dr);
                 __block int cap = 60;
                 for (NSString *k in dd) {
                     if (cap-- <= 0) break;
