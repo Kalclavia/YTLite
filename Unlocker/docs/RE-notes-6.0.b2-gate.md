@@ -152,3 +152,83 @@ MSHookMessageEx-style inline patch fallback or use fishhook.
   5-min scan loop already covers this, and did not fire this round: the
   login page was opened through LC's embedded auth, class resolved inside
   a private framework context? round 5 tip: open the login sheet EARLY).
+
+## 8. Round 5 confirmed: runtime text hooks are fatal under LiveContainer
+
+v2.2 baked IPA imported as LC app → SIGKILL on launch, zero YULU log lines:
+`MSHookFunction` patched signed `YTLite.dylib` `__text` → kernel terminates
+with `CODESIGNING — "Invalid Page"`. Crash report
+`LiveContainer-2026-10-20-222148.ips`: frame #0 = YTLite.dylib + the hooked
+gate entry. ANY runtime write into method bodies of a signed image dies under
+LC. ObjC-method-swizzle level hooks stay LC-safe; function-level do not.
+→ v3 goes static: patch the dylib at bake time, re-sign, ship. No hooks.
+
+## 9. Round 6: gate semantics fully solved (rootful build, static)
+
+### What the gate is
+
+Rootful gate = `0xb98a4` (fingerprint above). One fat state-machine function.
+Not a boolean check: it is **YTLite's preference reader**. Roughly 75 veneer
+call sites pass a preference-key C string in x0; the gate returns the boolean/
+integer value for that key. Licensed+crypted: real value. Anything else: **0**
+(unchecked → every YTLite feature toggle reads "off"). This explains rounds
+1–5 exactly: settings changed nothing while locked.
+
+### Dispatcher mechanics (delivered by flatten.py + symbolic walk)
+
+- Prologue stashes 14 two-entry branch tables (`0x21c9e98…0x21c9fe8`, step
+  0x18) into x29/sp slots; every basic block ends in `br xN` selecting
+  `TAB[flag]` where `flag = cset(w) from cmp cell,<const>`.
+- The "cell" is the internal u32 at `[x29,#-0x84]` (address in `[x29,#-0x90]`):
+  blocks write an opcode constant into it (`str wN,[x8]`) and re-dispatch; the
+  cmp-chain decodes the opcode (signed lt / eq against the movz constants).
+- Constants (w-reg → value): w21=0xBFD009CA w25=0x57267398 w26=0x3C069823
+  w27=0x233C8FD4 w24=0x0D1AD0E4 w13=0x6D769CD5 w12=0xB03DCD41 w11=0xDC0EA9EF
+  w14=0x8D7E434F w19=0x2E12603C w20=0x0FD1C358 mid-body magic w9=0x8C3CC50A.
+  Entry-stub DAT @0x21c9ea8 = 0x2e14f9ec (identity anchor).
+- Calls (all real, chained-fixup named): `bl 0xdfabc` → unknown validation
+  bool f (cached `[x29,#-0x61]`); `bl 0xdfae0` +
+  clsref@0x21979d8/selector "standardUserDefaults" → NSUD (cached
+  `[x29,#-0x70]`); `bl 0xdfb00` → objc_msgSend-ish `integerForKey:`
+  (selref 0x21915d8 = "integerForKey:", x2 = original x0 = caller's key),
+  result cached `[x29,#-0x78]`.
+- Tamper byte: global at `0x228e0200`, cached `[x29,#-0x62]` inside the gate.
+
+### Exit paths (symbolic execution of the full dispatcher — 33 states, 3 terminals)
+
+| f (0xdfabc bool) | g (0x228e0200) | result returned to all 75 callers |
+|---|---|---|
+| 0 | any | ZERO — feature off |
+| 1 | 1   | ZERO — "environment tampered" |
+| 1 | 0   | **INT — real `integerForKey:<key>` value** (NSUD fetched, key passed) |
+
+f=0 path taken when `0xdfabc` says not-valid; g read via the csel at 0xb9ecc
+(`csel w8,w26,w11,ne`: ne → g!=0 → w26=reject; g==0 → w11=accept-op). The
+value path then flows: NSUD fetch (`0xb9ccc`) → integerForKey (`0xb9e1c`) →
+result forwarded `[-0x78]→[-0x80]` (`0xb9acc`) → epilogue (returns it).
+
+### The crack (bake-time, 8 bytes)
+
+```
+0xb9be8: 0x940097b5  bl #0xdfabc            ->  0x52800020  mov w0, #1
+0xb9ecc: 0x1a8b1348  csel w8, w26, w11, ne  ->  0x2a0b03e8  mov w8, w11
+```
+
+Patch 1 forces f=1 (skips the unknown 0xdfabc check entirely). Patch 2
+forces the accept-op write regardless of the tamper byte. Symbolic run of
+the patched dispatcher (gate_patch_check.py, patch sites emulated):
+**exactly one terminal — the integerForKey value path**, and the tamper
+byte's actual value becomes irrelevant. Prologue/veneers/consumer ABI
+(no changes; the remaining calls `dfae0/dfb00/173010-...` are untouched and
+real).
+
+Ships via `Unlocker/tools/patch_gate.py` run inside the bake:
+workflow extracts ytplus.deb (`dpkg-deb -R`), patches the single
+`Library/MobileSubstrate/DynamicLibraries/YTLite.dylib`, repacks
+(`dpkg-deb -b`) → cyan injects as before → final IPA re-signed by cyan.
+The deb dylib and the cyan-baked dylib differ ONLY in load commands
+(CydiaSubstrate install-path rewrite) — __TEXT identical, so patch offsets
+hold on both; a post-bake `--verify` step re-asserts the crack in the
+finished artifact. Re-run requirement on any future YTLite update: offsets
++ anchor 0x21c9ea8 == 0x2e14f9ec must be re-derived (patcher refuses loudly
+otherwise).

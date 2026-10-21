@@ -185,6 +185,29 @@ jobs:
             exit 1
           fi
 
+      - name: Patch YTLite licensing gate inside ytplus.deb (v3 static crack)
+        if: ${{ inputs.ipa_has_ytplus == false }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/ytproot && mkdir -p /tmp/ytproot
+          if ! dpkg-deb -R ytplus.deb /tmp/ytproot; then
+            echo "::error::dpkg-deb -R failed on ytplus.deb"
+            exit 1
+          fi
+          dylib=$(find /tmp/ytproot -name "YTLite.dylib" -type f | head -n 1)
+          if [ -z "$dylib" ]; then
+            echo "::error::YTLite.dylib not found inside ytplus.deb"
+            exit 1
+          fi
+          echo "Patching $dylib"
+          python3 Unlocker/tools/patch_gate.py "$dylib"
+          dpkg-deb -b /tmp/ytproot ytplus.deb
+          file_type=$(file --mime-type -b ytplus.deb)
+          if [[ "$file_type" != "application/vnd.debian.binary-package" ]]; then
+            echo "::error::repacked ytplus.deb is not a valid deb (${file_type})"
+            exit 1
+          fi
+
       - name: Install cyan
         run: pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
 
@@ -198,6 +221,22 @@ jobs:
           version="${{ inputs.ytplus_version }}"
           [ "$version" = "" ] && version="local"
           cyan -i base.ipa -o "YouTubePlus_${version}_Unlocked.ipa" -uwef $tweaks
+
+      - name: Verify gate crack survived the bake
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/baked && mkdir -p /tmp/baked
+          unzip -q YouTubePlus_*_Unlocked.ipa -d /tmp/baked
+          dylib=$(find /tmp/baked -name "YTLite.dylib" -type f | head -n 1)
+          if [ -z "$dylib" ]; then
+            echo "::error::no YTLite.dylib in the baked IPA — nothing was patched"
+            exit 1
+          fi
+          python3 Unlocker/tools/patch_gate.py --verify "$dylib"
+          python3 - "$dylib" <<'PY'
+          import hashlib, sys
+          print("baked YTLite.dylib sha256:", hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())
+          PY
 
       - name: Upload unlocked IPA artifact
         uses: actions/upload-artifact@v7
