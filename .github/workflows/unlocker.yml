@@ -118,6 +118,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Install packaging dependencies
+        run: |
+          brew install dpkg
+          command -v dpkg-deb
+
       - name: Download built unlocker deb
         uses: actions/download-artifact@v8
         with:
