@@ -62,7 +62,6 @@ static const uint32_t kGateFP[8] = {
     0x52813955, 0x72b7fa15, 0x528e7319, 0x72aae4d9,
     0x5293047a, 0x72a780da, 0x5291fa9b, 0x72a4679b,
 };
-static const unsigned long kGateFPLen = 8;  // unique in the whole 38 MB image (verified offline)
 static const uint32_t kGatePrologue[4] = { 0xd107c3ff, 0xa9196ffc, 0xa91a67fa, 0xa91b5ff8 };
 
 // === IMPORTANT: all static-RE VMA notes here and in docs/RE-notes-6.0.b2-gate.md
@@ -447,7 +446,7 @@ static void locateAndHookGate(NSString *phase) {
         if (!path) continue;
         BOOL named = [[path.lastPathComponent lowercaseString] containsString:@"ytlite"];
         uint32_t first = kGateFP[0];
-        for (unsigned long off = 0; off + 64 <= sz; off += 4) {
+        for (unsigned long off = 0; off + sizeof(kGateFP) <= sz; off += 4) {
             if (text[off >> 2] != first) continue;
             if (memcmp((uint8_t *)text + off, kGateFP, sizeof(kGateFP)) != 0) continue;
             uint32_t *fn = (uint32_t *)((uint8_t *)text + off - 0x20);

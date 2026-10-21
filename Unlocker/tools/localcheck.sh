@@ -21,11 +21,12 @@ EXTRA_INC="${EXTRA_INC:-$HOME/.theos-quick/local-include}"
 
 perl "$THEOS/vendor/logos/bin/logos.pl" "$SRC" > "$WORK/Tweak.m"
 
-# shellcheck disable=SC2086
-clang -x objective-c -fobjc-arc -fexceptions -std=gnu11 \
+# Full codegen compile with CI-grade strictness (-Werror) so codegen-only
+# warnings (e.g. unused statics) are caught locally, not on a runner 8 min in.
+clang -x objective-c -fobjc-arc -fexceptions -std=gnu11 -Werror \
   -target arm64-apple-ios13.0 -isysroot "$SDK" \
   -I "$THEOS/vendor/include" \
   -I "$EXTRA_INC" \
-  -fsyntax-only "$WORK/Tweak.m"
+  -c "$WORK/Tweak.m" -o "$WORK/Tweak.o"
 
 echo "[gate] $SRC: syntax OK"
